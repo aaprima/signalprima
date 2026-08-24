@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 /* ============================================================
-   SIGNALYNX — prototype
+   SIGNAL PRIMA — prototype
    Data harga: SIMULASI (deterministik per instrumen)
    Narasi analisis: AI (Claude) beneran, dari angka indikator asli
    ============================================================ */
