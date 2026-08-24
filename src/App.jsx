@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 /* ============================================================
-   SIGNAL PRIMA — prototype
+   SIGNALYNX — prototype
    Data harga: SIMULASI (deterministik per instrumen)
    Narasi analisis: AI (Claude) beneran, dari angka indikator asli
    ============================================================ */
@@ -251,7 +251,31 @@ function computeSignal(instrument, cfg, style, liveCandles) {
   };
 }
 
-async function narrateSignal(instrument, style, sig, proxyUrl) {
+// Narasi tanpa AI — disusun dari rumus/kondisi indikator, gratis & instan.
+function generateTemplateNarrative(instrument, style, sig) {
+  const { indicators, bias, dp, entry, sl, tp3 } = sig;
+  const isBuy = bias === "buy";
+  const emaOrder = isBuy
+    ? indicators.ema20 > indicators.ema50 && indicators.ema50 > indicators.ema100
+    : indicators.ema20 < indicators.ema50 && indicators.ema50 < indicators.ema100;
+  const rsiWord = indicators.rsi > 70 ? "overbought" : indicators.rsi < 30 ? "oversold" : indicators.rsi > 50 ? "netral cenderung naik" : "netral cenderung turun";
+
+  const ringkasan =
+    `${instrument} ${style.tf} berada di ${fmt(entry, dp)} dengan bias ${isBuy ? "bullish" : "bearish"}. ` +
+    `Struktur EMA20 (${fmt(indicators.ema20, dp)}), EMA50 (${fmt(indicators.ema50, dp)}), EMA100 (${fmt(indicators.ema100, dp)}) ` +
+    `${emaOrder ? "tersusun rapi mendukung arah ini" : "belum sepenuhnya searah, jadi sinyal ini tergolong moderat"}. ` +
+    `RSI14 di ${indicators.rsi.toFixed(1)} (${rsiWord}). ` +
+    `ATR14 sebesar ${fmt(indicators.atr, dp)} dipakai sebagai basis jarak Stop Loss dan target TP1-TP3 dengan rasio risk/reward 1:2 sampai 1:4.`;
+
+  const invalidasi = isBuy
+    ? `Sinyal batal jika harga menutup candle ${style.tf} di bawah level Stop Loss ${fmt(sl, dp)}, mengindikasikan momentum bullish gagal bertahan.`
+    : `Sinyal batal jika harga menutup candle ${style.tf} di atas level Stop Loss ${fmt(sl, dp)}, mengindikasikan momentum bearish gagal bertahan.`;
+
+  return Promise.resolve({ ringkasan, invalidasi });
+}
+
+async function narrateSignal(instrument, style, sig, proxyUrl, mode) {
+  if (mode === "template") return generateTemplateNarrative(instrument, style, sig);
   const { indicators, bias, dp, entry, sl, tp1, tp3 } = sig;
   const system =
     "Kamu adalah analis teknikal forex/crypto/emas berpengalaman yang menulis ringkasan sinyal trading dalam Bahasa Indonesia. " +
@@ -410,7 +434,7 @@ function SkeletonLines({ n }) {
 }
 
 // ---------------- Main sections ----------------
-function AnalisaSendiri({ proxyUrl }) {
+function AnalisaSendiri({ proxyUrl, narrationMode }) {
   const [market, setMarket] = useState("forex");
   const [instrument, setInstrument] = useState("GBPUSD");
   const [styleId, setStyleId] = useState("daytrade");
@@ -455,7 +479,7 @@ function AnalisaSendiri({ proxyUrl }) {
     setDataSource(source);
     setLoadingAi(true);
     try {
-      const result = await narrateSignal(instrument, style, s, proxyUrl);
+      const result = await narrateSignal(instrument, style, s, proxyUrl, narrationMode);
       setAi(result);
     } catch (e) {
       setError("Gagal mengambil narasi AI (" + e.message + ").");
@@ -724,7 +748,7 @@ const WATCHLIST = [
   { market: "forex", sym: "GBPUSD" },
 ];
 
-function SignalHarian({ proxyUrl }) {
+function SignalHarian({ proxyUrl, narrationMode }) {
   const [items, setItems] = useState([]);
   const [expanded, setExpanded] = useState(null);
   const [aiMap, setAiMap] = useState({});
@@ -748,7 +772,7 @@ function SignalHarian({ proxyUrl }) {
     if (!aiMap[key]) {
       setLoadingKey(key);
       try {
-        const res = await narrateSignal(item.sym, item.style, item.sig, proxyUrl);
+        const res = await narrateSignal(item.sym, item.style, item.sig, proxyUrl, narrationMode);
         setAiMap((m) => ({ ...m, [key]: res }));
       } catch (e) {
         setAiMap((m) => ({ ...m, [key]: { ringkasan: "Gagal memuat analisis.", invalidasi: "-" } }));
@@ -819,7 +843,7 @@ function Disclaimer() {
   );
 }
 
-function SettingsPanel({ proxyUrl, setProxyUrl }) {
+function SettingsPanel({ proxyUrl, setProxyUrl, narrationMode, setNarrationMode }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(proxyUrl);
 
@@ -827,35 +851,64 @@ function SettingsPanel({ proxyUrl, setProxyUrl }) {
     <div className="mb-6">
       <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-xs text-[#8D8B93] hover:text-[#C9C7CF] mx-auto block">
         <span className={"inline-block w-1.5 h-1.5 rounded-full " + (proxyUrl ? "bg-[#34C77B]" : "bg-[#55545C]")} />
-        {proxyUrl ? "Data live aktif" : "Pakai data simulasi"} · pengaturan
+        {proxyUrl ? "Data live aktif" : "Pakai data simulasi"} · {narrationMode === "ai" ? "narasi AI" : "narasi template"} · pengaturan
       </button>
       {open && (
-        <div className="mt-3 rounded-lg border border-[#26262C] bg-[#111114] p-4 space-y-2.5">
-          <label className="text-[10px] tracking-wider text-[#8D8B93]">PROXY URL (Cloudflare Worker kamu)</label>
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="https://signalynx-proxy.namamu.workers.dev"
-            className="w-full rounded-md bg-[#0A0A0D] border border-[#26262C] px-3 py-2 text-xs font-mono text-[#F1EFE9] focus:outline-none focus:border-[#C9A45C]"
-          />
-          <div className="flex gap-2">
-            <button onClick={() => setProxyUrl(draft.trim())} className="text-xs rounded-md bg-[#C9A45C] text-[#0A0A0D] px-3 py-1.5 font-medium">
-              Simpan
-            </button>
-            {proxyUrl && (
-              <button
-                onClick={() => {
-                  setDraft("");
-                  setProxyUrl("");
-                }}
-                className="text-xs rounded-md border border-[#26262C] text-[#8D8B93] px-3 py-1.5"
-              >
-                Hapus, pakai simulasi
+        <div className="mt-3 rounded-lg border border-[#26262C] bg-[#111114] p-4 space-y-4">
+          <div>
+            <label className="text-[10px] tracking-wider text-[#8D8B93]">PROXY URL (Cloudflare Worker kamu)</label>
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="https://signalprima-proxy.namamu.workers.dev"
+              className="w-full rounded-md bg-[#0A0A0D] border border-[#26262C] px-3 py-2 mt-1.5 text-xs font-mono text-[#F1EFE9] focus:outline-none focus:border-[#C9A45C]"
+            />
+            <div className="flex gap-2 mt-2">
+              <button onClick={() => setProxyUrl(draft.trim())} className="text-xs rounded-md bg-[#C9A45C] text-[#0A0A0D] px-3 py-1.5 font-medium">
+                Simpan
               </button>
-            )}
+              {proxyUrl && (
+                <button
+                  onClick={() => {
+                    setDraft("");
+                    setProxyUrl("");
+                  }}
+                  className="text-xs rounded-md border border-[#26262C] text-[#8D8B93] px-3 py-1.5"
+                >
+                  Hapus, pakai simulasi
+                </button>
+              )}
+            </div>
           </div>
+
+          <div className="pt-3 border-t border-[#26262C]">
+            <label className="text-[10px] tracking-wider text-[#8D8B93]">RINGKASAN ANALISIS</label>
+            <div className="flex gap-2 mt-1.5">
+              <button
+                onClick={() => setNarrationMode("ai")}
+                className={
+                  "flex-1 rounded-md border px-3 py-2 text-xs transition-colors " +
+                  (narrationMode === "ai" ? "border-[#C9A45C] text-[#F1EFE9] bg-[#C9A45C]/10" : "border-[#26262C] text-[#8D8B93]")
+                }
+              >
+                Pakai AI
+                <div className="text-[9px] mt-0.5 opacity-70">Butuh kredit Anthropic</div>
+              </button>
+              <button
+                onClick={() => setNarrationMode("template")}
+                className={
+                  "flex-1 rounded-md border px-3 py-2 text-xs transition-colors " +
+                  (narrationMode === "template" ? "border-[#C9A45C] text-[#F1EFE9] bg-[#C9A45C]/10" : "border-[#26262C] text-[#8D8B93]")
+                }
+              >
+                Template otomatis
+                <div className="text-[9px] mt-0.5 opacity-70">Gratis, tanpa AI</div>
+              </button>
+            </div>
+          </div>
+
           <p className="text-[10px] text-[#55545C] leading-relaxed">
-            Proxy ini dipakai untuk dua hal: mengambil harga live dari TwelveData, dan meminta narasi analisis dari Claude. Key TwelveData &amp; Anthropic tidak pernah ditaruh di sini — hanya tersimpan di server proxy kamu. Kosongkan untuk kembali ke mode simulasi.
+            Proxy dipakai untuk harga live TwelveData, dan untuk narasi AI (kalau modenya "Pakai AI"). Key TwelveData &amp; Anthropic tidak pernah ditaruh di sini — hanya tersimpan di server proxy kamu. Tab "Analisa Chart" selalu butuh AI (untuk baca gambar), berapa pun mode yang dipilih di sini.
           </p>
         </div>
       )}
@@ -866,6 +919,7 @@ function SettingsPanel({ proxyUrl, setProxyUrl }) {
 export default function App() {
   const [tab, setTab] = useState("sendiri");
   const [proxyUrl, setProxyUrl] = useState("");
+  const [narrationMode, setNarrationMode] = useState("ai");
   const tabs = [
     { id: "sendiri", label: "Analisa Sendiri" },
     { id: "chart", label: "Analisa Chart" },
@@ -880,12 +934,12 @@ export default function App() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="font-serif text-3xl tracking-tight">
-            Signal<span className="text-[#C9A45C]">ynx</span>
+            Signal <span className="text-[#C9A45C]">Prima</span>
           </h1>
           <p className="text-[10px] tracking-[0.2em] text-[#8D8B93] mt-1.5">ANALISA TEKNIKAL OTOMATIS</p>
         </div>
 
-        <SettingsPanel proxyUrl={proxyUrl} setProxyUrl={setProxyUrl} />
+        <SettingsPanel proxyUrl={proxyUrl} setProxyUrl={setProxyUrl} narrationMode={narrationMode} setNarrationMode={setNarrationMode} />
 
         <div className="flex border-b border-[#26262C] mb-7">
           {tabs.map((t) => (
@@ -899,9 +953,9 @@ export default function App() {
           ))}
         </div>
 
-        {tab === "sendiri" && <AnalisaSendiri proxyUrl={proxyUrl} />}
+        {tab === "sendiri" && <AnalisaSendiri proxyUrl={proxyUrl} narrationMode={narrationMode} />}
         {tab === "chart" && <AnalisaChart proxyUrl={proxyUrl} />}
-        {tab === "harian" && <SignalHarian proxyUrl={proxyUrl} />}
+        {tab === "harian" && <SignalHarian proxyUrl={proxyUrl} narrationMode={narrationMode} />}
       </div>
     </div>
   );
