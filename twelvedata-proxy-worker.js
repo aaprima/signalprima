@@ -1,5 +1,5 @@
 // ============================================================
-// Signalynx — TwelveData + Claude proxy (Cloudflare Worker)
+// Signalprima — TwelveData + Claude proxy (Cloudflare Worker)
 // Menyimpan API key TwelveData & Anthropic dengan aman di server,
 // supaya tidak pernah muncul di kode frontend/browser.
 // ============================================================
@@ -7,7 +7,7 @@
 // CARA PAKAI:
 // 1. Buka https://dash.cloudflare.com -> daftar/login (gratis).
 // 2. Workers & Pages -> Create application -> tab Workers -> Start with Hello World!
-// 3. Kasih nama terserah, mis. "signalynx-proxy" -> Deploy.
+// 3. Kasih nama terserah, mis. "signalprima-proxy" -> Deploy.
 // 4. Klik "Edit code", hapus semua isi default, tempel isi file ini, lalu Deploy.
 // 5. Buka tab Settings -> Variables and Secrets -> Add.
 //    Tambah dua secret:
@@ -15,8 +15,8 @@
 //      - ANTHROPIC_API_KEY    = API key dari console.anthropic.com
 //    Keduanya wajib di-set sebagai Secret (encrypted), bukan plain text.
 // 6. Setelah deploy, kamu akan dapat URL seperti:
-//    https://signalynx-proxy.<nama-kamu>.workers.dev
-// 7. Tempel URL itu ke kolom "Proxy URL" di aplikasi Signalynx.
+//    https://signalprima-proxy.<nama-kamu>.workers.dev
+// 7. Tempel URL itu ke kolom "Proxy URL" di aplikasi Signal Prima.
 //
 // Worker ini meneruskan dua jenis permintaan:
 //   GET  /time_series  -> data candle dari TwelveData
