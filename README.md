@@ -7,22 +7,22 @@ di percakapan Claude, atau minta lagi ke Claude kalau hilang).
 ## Deploy ke Cloudflare Pages (tanpa install apa pun di HP/laptop)
 
 1. Buat akun GitHub kalau belum punya (github.com).
-2. Buat repository baru (New repository), kasih nama `signalprima`, public/private
+2. Buat repository baru (New repository), kasih nama `signalynx`, public/private
    bebas.
 3. Di halaman repo kosong itu, klik "uploading an existing file" ->
    upload SEMUA file & folder di proyek ini (pertahankan struktur foldernya:
    `src/App.jsx`, `src/main.jsx`, dst) -> Commit changes.
 4. Buka dash.cloudflare.com -> Workers & Pages -> Create application ->
-   tab **Pages** -> **Connect to Git** -> pilih repo `signalprima` tadi.
+   tab **Pages** -> **Connect to Git** -> pilih repo `signalynx` tadi.
 5. Build settings:
    - Framework preset: **Vite**
    - Build command: `npm run build`
    - Build output directory: `dist`
 6. Deploy. Setelah selesai, kamu dapat URL seperti
-   `https://signalprima.pages.dev` — itu website Signal Prima kamu, bisa dibuka
+   `https://signalynx.pages.dev` — itu website Signalynx kamu, bisa dibuka
    dari HP mana saja.
 7. Buka website itu -> klik "pengaturan" -> isi Proxy URL dengan URL Worker
-   kamu (`https://signalprima-proxy.xxx.workers.dev`) -> Simpan.
+   kamu (`https://signalynx-proxy.xxx.workers.dev`) -> Simpan.
 
 ## Yang perlu diingat
 
