@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 /* ============================================================
-   SIGNALPRIMA — prototype
+   SIGNALYNX — prototype
    Data harga: SIMULASI (deterministik per instrumen)
    Narasi analisis: AI (Claude) beneran, dari angka indikator asli
    ============================================================ */
@@ -218,6 +218,36 @@ function applyPriceOverride(candles, price) {
   return updated;
 }
 
+// ---------------- Pair di luar daftar cepat ----------------
+// Konfigurasi dibuat otomatis dari nama pair yang diketik user. Selalu butuh data live (tidak ada simulasi).
+function isValidSymbol(sym) {
+  return /^[A-Z0-9]{2,12}(\/[A-Z0-9]{2,6})?$/.test(sym);
+}
+function toTdSymbol(marketKey, sym) {
+  if (sym.includes("/")) return sym;
+  if (marketKey === "saham_as") return sym;
+  if (marketKey === "crypto") {
+    if (sym.endsWith("USDT") || sym.endsWith("USDC")) return sym.slice(0, -4) + "/USD";
+    if (sym.endsWith("USD")) return sym.slice(0, -3) + "/USD";
+    return sym + "/USD";
+  }
+  if (sym.length === 6) return sym.slice(0, 3) + "/" + sym.slice(3); // forex & logam: AUDNZD -> AUD/NZD
+  return sym;
+}
+function inferDp(price) {
+  if (price >= 1000) return 2;
+  if (price >= 100) return 3;
+  if (price >= 10) return 4;
+  if (price >= 1) return 5;
+  return 6;
+}
+function getInstrumentConfig(marketKey, sym) {
+  const known = MARKETS[marketKey].data[sym];
+  if (known) return known;
+  if (!isValidSymbol(sym)) return null;
+  return { custom: true, td: toTdSymbol(marketKey, sym), dp: null, base: 1, vol: 0.006 };
+}
+
 const STYLES = [
   { id: "scalping", label: "Scalping", desc: "Tahan 15 menit – 3 jam", tf: "M15", count: 70, volMult: 1.4 },
   { id: "daytrade", label: "Day Trade", desc: "Tahan 2 – 12 jam", tf: "H1", count: 80, volMult: 1.0 },
@@ -258,7 +288,7 @@ async function askCloudflareAI({ system, userContent }, proxyUrl) {
     body: JSON.stringify({ system, messages: [{ role: "user", content: userContent }] }),
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error);
+  if (data.error) throw new Error(data.error + (data.detail ? " — " + data.detail : ""));
   const clean = (data.text || "").replace(/```json|```/g, "").trim();
   return JSON.parse(clean);
 }
@@ -521,24 +551,41 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
   }, [market]);
 
   const handleGenerate = async () => {
-    const cfg = marketCfg.data[instrument];
-    if (!cfg) return;
+    const baseCfg = getInstrumentConfig(market, instrument);
+    if (!baseCfg) {
+      setError("Nama pair tidak valid. Contoh: AUDNZD, BTCUSDT, XAUUSD.");
+      return;
+    }
     setError(null);
     setSig(null);
     setAi(null);
 
+    if (baseCfg.custom && !proxyUrl) {
+      setError("Pair di luar daftar butuh data live — isi Proxy URL dulu di pengaturan.");
+      return;
+    }
+
     let liveCandles = null;
     let source = "simulasi";
-    if (proxyUrl && cfg.td) {
+    if (proxyUrl && baseCfg.td) {
       setLoadingPrice(true);
       try {
-        liveCandles = await fetchLiveCandles(proxyUrl, cfg.td, style.tf, style.count);
+        liveCandles = await fetchLiveCandles(proxyUrl, baseCfg.td, style.tf, style.count);
         source = "live";
       } catch (e) {
+        if (baseCfg.custom) {
+          setError("Gagal ambil data " + instrument + " (" + e.message + "). Pastikan nama pair benar dan sesuai market yang dipilih.");
+          return;
+        }
         setError("Gagal ambil data live (" + e.message + ") — pakai data simulasi dulu.");
       } finally {
         setLoadingPrice(false);
       }
+    }
+
+    if (baseCfg.custom && (!liveCandles || liveCandles.length < 30)) {
+      setError("Data " + instrument + " terlalu sedikit untuk dianalisa. Coba pair lain atau gaya trading lain.");
+      return;
     }
 
     if (proxyUrl && liveCandles && GOLDAPI_SYMBOL[instrument]) {
@@ -551,6 +598,7 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
       }
     }
 
+    const cfg = baseCfg.custom ? { ...baseCfg, dp: inferDp(liveCandles[liveCandles.length - 1].close) } : baseCfg;
     const s = computeSignal(instrument, cfg, style, liveCandles);
     setSig(s);
     setDataSource(source);
@@ -591,12 +639,12 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
       </Section>
 
       <Section num="02" title="Instrumen">
-        <p className="text-xs text-[#8D8B93] mb-2.5">Pilih dari daftar di bawah, atau tulis sendiri pair yang kamu mau.</p>
+        <p className="text-xs text-[#8D8B93] mb-2.5">Pilih dari daftar di bawah, atau tulis sendiri pair yang kamu mau (pair di luar daftar butuh data live aktif).</p>
         <input
           value={instrument}
-          onChange={(e) => setInstrument(e.target.value.toUpperCase())}
+          onChange={(e) => setInstrument(e.target.value.toUpperCase().replace(/[^A-Z0-9/]/g, ""))}
           className="w-full rounded-lg bg-[#111114] border border-[#26262C] px-4 py-3 font-mono text-[#F1EFE9] focus:outline-none focus:border-[#C9A45C] mb-2.5"
-          placeholder="Ketik pair, mis. XAUUSD"
+          placeholder="Ketik pair, mis. AUDNZD"
         />
         <div className="flex flex-wrap gap-2">
           {marketCfg.quick.map((q) => (
@@ -637,7 +685,7 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
 
       <button
         onClick={handleGenerate}
-        disabled={!marketCfg.data[instrument] || loadingPrice}
+        disabled={!instrument || loadingPrice}
         className="w-full rounded-lg bg-[#C9A45C] hover:bg-[#D8B36C] disabled:opacity-40 text-[#0A0A0D] font-semibold py-3.5 transition-colors"
       >
         {loadingPrice ? "Mengambil data harga…" : "Buat sinyal"}
