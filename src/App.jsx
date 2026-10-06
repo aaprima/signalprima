@@ -141,8 +141,21 @@ const MARKETS = {
   saham_id: { label: "Saham ID", quick: [], data: {}, soon: true },
 };
 
-const TD_INTERVAL = { M15: "15min", H1: "1h", H4: "4h" };
-const OANDA_GRANULARITY = { M15: "M15", H1: "H1", H4: "H4" };
+const TD_INTERVAL = { M1: "1min", M5: "5min", M15: "15min", M30: "30min", H1: "1h", H4: "4h", D1: "1day", W1: "1week" };
+const OANDA_GRANULARITY = { M1: "M1", M5: "M5", M15: "M15", M30: "M30", H1: "H1", H4: "H4", D1: "D", W1: "W" };
+// Jumlah candle & volatilitas simulasi per timeframe (dipakai lepas dari gaya trading, supaya timeframe bisa dipilih bebas).
+const TF_COUNT = { M1: 150, M5: 120, M15: 100, M30: 100, H1: 100, H4: 90, D1: 60, W1: 52 };
+const TF_VOLMULT = { M1: 2.2, M5: 1.8, M15: 1.4, M30: 1.2, H1: 1.0, H4: 0.75, D1: 0.5, W1: 0.35 };
+const TF_DESC = {
+  M1: "Super scalping — tahan beberapa menit",
+  M5: "Scalping cepat — tahan belasan menit",
+  M15: "Scalping — tahan 15 menit – 3 jam",
+  M30: "Scalping lambat — tahan 1 – 4 jam",
+  H1: "Day trade — tahan 2 – 12 jam",
+  H4: "Swing — tahan 1 – 5 hari",
+  D1: "Posisi harian — tahan beberapa hari – minggu",
+  W1: "Posisi mingguan — tahan beberapa minggu",
+};
 
 // Ambil candle live lewat proxy Cloudflare Worker milik user (TwelveData: Crypto/Saham).
 async function fetchLiveCandles(proxyUrl, tdSymbol, tf, outputsize) {
@@ -249,9 +262,9 @@ function getInstrumentConfig(marketKey, sym) {
 }
 
 const STYLES = [
-  { id: "scalping", label: "Scalping", desc: "Tahan 15 menit – 3 jam", tf: "M15", count: 70, volMult: 1.4 },
-  { id: "daytrade", label: "Day Trade", desc: "Tahan 2 – 12 jam", tf: "H1", count: 80, volMult: 1.0 },
-  { id: "swing", label: "Swing", desc: "Tahan 1 – 5 hari", tf: "H4", count: 90, volMult: 0.75 },
+  { id: "scalping", label: "Scalping", desc: "Tahan 15 menit – 3 jam", tf: "M15" },
+  { id: "daytrade", label: "Day Trade", desc: "Tahan 2 – 12 jam", tf: "H1" },
+  { id: "swing", label: "Swing", desc: "Tahan 1 – 5 hari", tf: "H4" },
 ];
 
 const TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1"];
@@ -294,9 +307,9 @@ async function askCloudflareAI({ system, userContent }, proxyUrl) {
 }
 
 // ---------------- signal engine ----------------
-function computeSignal(instrument, cfg, style, liveCandles) {
-  const count = style.count;
-  const candles = liveCandles && liveCandles.length >= 30 ? liveCandles : generateCandles(instrument, cfg.base, count, cfg.vol * style.volMult);
+function computeSignal(instrument, cfg, tf, liveCandles) {
+  const count = TF_COUNT[tf] || 100;
+  const candles = liveCandles && liveCandles.length >= 30 ? liveCandles : generateCandles(instrument, cfg.base, count, cfg.vol * (TF_VOLMULT[tf] || 1));
   const closes = candles.map((c) => c.close);
   const ema20 = ema(closes, 20);
   const ema50 = ema(closes, 50);
@@ -535,6 +548,7 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
   const [market, setMarket] = useState("forex");
   const [instrument, setInstrument] = useState("GBPUSD");
   const [styleId, setStyleId] = useState("daytrade");
+  const [tf, setTf] = useState("H1"); // timeframe efektif — bisa override gaya trading
   const [sig, setSig] = useState(null);
   const [ai, setAi] = useState(null);
   const [loadingAi, setLoadingAi] = useState(false);
@@ -549,6 +563,12 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
       setInstrument(marketCfg.quick[0]);
     }
   }, [market]);
+
+  // Pilih gaya trading -> set timeframe default-nya. Tetap bisa di-override manual di bawah.
+  const handlePickStyle = (id) => {
+    setStyleId(id);
+    setTf(STYLES.find((s) => s.id === id).tf);
+  };
 
   const handleGenerate = async () => {
     const baseCfg = getInstrumentConfig(market, instrument);
@@ -570,7 +590,7 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
     if (proxyUrl && baseCfg.td) {
       setLoadingPrice(true);
       try {
-        liveCandles = await fetchLiveCandles(proxyUrl, baseCfg.td, style.tf, style.count);
+        liveCandles = await fetchLiveCandles(proxyUrl, baseCfg.td, tf, TF_COUNT[tf] || 100);
         source = "live";
       } catch (e) {
         if (baseCfg.custom) {
@@ -599,12 +619,12 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
     }
 
     const cfg = baseCfg.custom ? { ...baseCfg, dp: inferDp(liveCandles[liveCandles.length - 1].close) } : baseCfg;
-    const s = computeSignal(instrument, cfg, style, liveCandles);
+    const s = computeSignal(instrument, cfg, tf, liveCandles);
     setSig(s);
     setDataSource(source);
     setLoadingAi(true);
     try {
-      const result = await narrateSignal(instrument, style, s, proxyUrl, narrationMode);
+      const result = await narrateSignal(instrument, { label: style.label, tf }, s, proxyUrl, narrationMode);
       setAi(result);
     } catch (e) {
       setError("Gagal mengambil narasi AI (" + e.message + ").");
@@ -663,21 +683,42 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
       </Section>
 
       <Section num="03" title="Gaya Trading">
+        <p className="text-xs text-[#8D8B93] mb-2.5">Pilih preset cepat — timeframe-nya bisa diubah manual di bawah.</p>
         <div className="space-y-2.5">
           {STYLES.map((s) => (
             <button
               key={s.id}
-              onClick={() => setStyleId(s.id)}
+              onClick={() => handlePickStyle(s.id)}
               className={
                 "w-full flex items-center justify-between rounded-lg border px-4 py-3.5 text-left transition-colors " +
-                (styleId === s.id ? "border-[#C9A45C] bg-[#C9A45C]/10" : "border-[#26262C] hover:border-[#3A3A42]")
+                (styleId === s.id && tf === s.tf ? "border-[#C9A45C] bg-[#C9A45C]/10" : "border-[#26262C] hover:border-[#3A3A42]")
               }
             >
               <div>
-                <div className={"text-sm " + (styleId === s.id ? "text-[#F1EFE9]" : "text-[#C9C7CF]")}>{s.label}</div>
+                <div className={"text-sm " + (styleId === s.id && tf === s.tf ? "text-[#F1EFE9]" : "text-[#C9C7CF]")}>{s.label}</div>
                 <div className="text-xs text-[#8D8B93] mt-0.5">{s.desc}</div>
               </div>
               <span className="font-mono text-[10px] text-[#8D8B93] border border-[#26262C] rounded px-1.5 py-0.5">{s.tf}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section num="04" title="Timeframe">
+        <p className="text-xs text-[#8D8B93] mb-2.5">
+          Timeframe aktif: <span className="font-mono text-[#C9A45C]">{tf}</span> — {TF_DESC[tf]}. Ketuk salah satu untuk override manual.
+        </p>
+        <div className="grid grid-cols-4 gap-2">
+          {TIMEFRAMES.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTf(t)}
+              className={
+                "rounded-lg border py-2.5 text-sm font-mono transition-colors " +
+                (tf === t ? "border-[#C9A45C] text-[#F1EFE9] bg-[#C9A45C]/10" : "border-[#26262C] text-[#8D8B93] hover:border-[#3A3A42]")
+              }
+            >
+              {t}
             </button>
           ))}
         </div>
@@ -705,7 +746,7 @@ function AnalisaSendiri({ proxyUrl, narrationMode }) {
               {dataSource === "goldapi" ? "● HARGA LIVE — GOLDAPI + TWELVEDATA" : dataSource === "live" ? "● DATA LIVE — TWELVEDATA" : "○ DATA SIMULASI"}
             </span>
           </div>
-          <SignalCard instrument={instrument} style={style} sig={sig} ai={ai} loadingAi={loadingAi} />
+          <SignalCard instrument={instrument} style={{ ...style, tf }} sig={sig} ai={ai} loadingAi={loadingAi} />
         </div>
       )}
 
