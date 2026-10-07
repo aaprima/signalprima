@@ -1092,10 +1092,36 @@ function SettingsPanel({ proxyUrl, setProxyUrl, narrationMode, setNarrationMode 
   );
 }
 
+// Baca/simpan pengaturan di localStorage milik browser ini, supaya tidak hilang saat refresh atau dibuka lagi nanti.
+// (Website ini berdiri sendiri, bukan artifact chat — localStorage aman dan normal dipakai di sini.)
+function readSaved(key, fallback) {
+  try {
+    const v = window.localStorage.getItem(key);
+    return v === null ? fallback : v;
+  } catch (e) {
+    return fallback;
+  }
+}
+function writeSaved(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (e) {
+    // localStorage tidak tersedia (mode private/incognito ketat dll) — abaikan, app tetap jalan, cuma tidak tersimpan.
+  }
+}
+
 export default function App() {
   const [tab, setTab] = useState("sendiri");
-  const [proxyUrl, setProxyUrl] = useState("");
-  const [narrationMode, setNarrationMode] = useState("ai");
+  const [proxyUrl, setProxyUrlState] = useState(() => readSaved("sp_proxyUrl", ""));
+  const [narrationMode, setNarrationModeState] = useState(() => readSaved("sp_narrationMode", "ai"));
+  const setProxyUrl = (v) => {
+    setProxyUrlState(v);
+    writeSaved("sp_proxyUrl", v);
+  };
+  const setNarrationMode = (v) => {
+    setNarrationModeState(v);
+    writeSaved("sp_narrationMode", v);
+  };
   const tabs = [
     { id: "sendiri", label: "Analisa Sendiri" },
     { id: "chart", label: "Analisa Chart" },
